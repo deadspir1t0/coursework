@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-import matplotlib
-matplotlib.use('TkAgg')   # попробовать сначала так
-
 from numpy import zeros, linspace, tanh, complex64, cosh
-from matplotlib.pyplot import style, figure, axes, show, subplots
-from celluloid import Camera
-import numpy as np
+from utils import *
 
 
 class PDEBurgForward:
-    def __init__(self, a, b, N, t_0, T, M, eps, q, alpha):
+    def __init__(self, a, b, N, t0, T, M, u_init, u_left, u_right, eps, q, alpha):
+        # начальные условия
+        self.u_init = u_init
+
+        # граничные условия
+        self.u_left = u_left
+        self.u_right = u_right
+
         # параметры сетки
         self.a = a
         self.b = b
         self.N = N
-        self.t_0 = t_0
+        self.t0 = t0
         self.T = T
         self.M = M
 
@@ -23,8 +25,8 @@ class PDEBurgForward:
         self.x = linspace(self.a, self.b, self.N + 1)
 
         # временная сетка
-        self.tau = (self.T - self.t_0) / self.M
-        self.t = linspace(self.t_0, self.T, self.M + 1)
+        self.tau = (self.T - self.t0) / self.M
+        self.t = linspace(self.t0, self.T, self.M + 1)
 
         # данные задачи
         self.eps = eps
@@ -39,15 +41,15 @@ class PDEBurgForward:
 
     # начальное условие
     def __u_init(self, x):
-        return np.exp(-(x-1)**2/2) - np.exp(-(x+1)**2/2)
+        return self.u_init(x)
 
     # левое граничное условие
     def __u_left(self, t):
-        return 0
+        return self.u_left(t)
 
     # правое граничное условие
     def __u_right(self, t):
-        return 0
+        return self.u_right(t)
 
     # правая часть системы ОДУ
     def __f(self, y, t):
@@ -113,25 +115,6 @@ class PDEBurgForward:
 
         return a, b, c
 
-    # метод прогонки
-    def __tridiagonal_matrix_algorithm(self, a, b, c, f):
-        n = len(f)
-        v = zeros(n, dtype=complex64)
-        w_1 = zeros(n, dtype=complex64)
-
-        w = a[0]
-        w_1[0] = f[0] / w
-
-        for i in range(1, n):
-            v[i - 1] = c[i - 1] / w
-            w = a[i] - b[i] * v[i - 1]
-            w_1[i] = (f[i] - b[i] * w_1[i - 1]) / w
-
-        for j in range(n - 2, -1, -1):
-            w_1[j] = w_1[j] - v[j] * w_1[j + 1]
-
-        return w_1
-
     def solve(self):
         # внутренние значения начального условия
         y = self.__u_init(self.x[1:self.N])
@@ -141,7 +124,7 @@ class PDEBurgForward:
                 y, self.t[m]
             )
 
-            w_1 = self.__tridiagonal_matrix_algorithm(
+            w_1 = tridiagonal_matrix_algorithm(
                 diagonal,
                 codiagonal_down,
                 codiagonal_up,
@@ -158,12 +141,12 @@ class PDEBurgForward:
 
 
 class PDEBurgAdjoint:
-    def __init__(self, a, b, N, t_0, T, M, u, f_obs, eps, q, alpha):
+    def __init__(self, a, b, N, t0, T, M, u, f_obs, eps, q, alpha):
         # параметры сетки
         self.a = a
         self.b = b
         self.N = N
-        self.t_0 = t_0
+        self.t_0 = t0
         self.T = T
         self.M = M
 
@@ -237,33 +220,14 @@ class PDEBurgAdjoint:
         c[0] = + self.alpha * self.tau * (- self.eps / self.h ** 2 + u_m[0] / (2 * self.h))
 
         for n in range(1, self.N - 2):
-            b[n] = + self.alpha * self.tau * (- self.eps / self.h ** 2 - u_m[n] / (2 * self.h))
+            b[n] = self.alpha * self.tau * (- self.eps / self.h ** 2 - u_m[n] / (2 * self.h))
             a[n] = 1. + self.alpha * self.tau * (2 * self.eps / self.h ** 2 + self.q[n])
-            c[n] = + self.alpha * self.tau * (- self.eps / self.h ** 2 + u_m[n] / (2 * self.h))
+            c[n] = self.alpha * self.tau * (- self.eps / self.h ** 2 + u_m[n] / (2 * self.h))
 
         b[self.N - 2] = + self.alpha * self.tau * (- self.eps / self.h ** 2 - u_m[self.N - 2] / (2 * self.h))
         a[self.N - 2] = 1. + self.alpha * self.tau * (2 * self.eps / self.h ** 2 + self.q[self.N - 2])
 
         return a, b, c
-
-    # метод прогонки
-    def __tridiagonal_matrix_algorithm(self, a, b, c, f):
-        n = len(f)
-        v = zeros(n, dtype=complex64)
-        w_1 = zeros(n, dtype=complex64)
-
-        w = a[0]
-        w_1[0] = f[0] / w
-
-        for i in range(1, n):
-            v[i - 1] = c[i - 1] / w
-            w = a[i] - b[i] * v[i - 1]
-            w_1[i] = (f[i] - b[i] * w_1[i - 1]) / w
-
-        for j in range(n - 2, -1, -1):
-            w_1[j] = w_1[j] - v[j] * w_1[j + 1]
-
-        return w_1
 
     def solve(self):
         # внутренние значения терминального условия
@@ -276,7 +240,7 @@ class PDEBurgAdjoint:
                 u_half, self.t[m]
             )
 
-            w_1 = self.__tridiagonal_matrix_algorithm(
+            w_1 = tridiagonal_matrix_algorithm(
                 diagonal,
                 codiagonal_down,
                 codiagonal_up,
@@ -290,70 +254,3 @@ class PDEBurgAdjoint:
             self.v[m - 1, self.N] = self.__v_right(self.t[m - 1])
 
         return self.v
-
-
-def __main__():
-    # ---------------------------
-    # параметры задачи
-    # ---------------------------
-
-    a = -6.0
-    b = 6.0
-    t_0 = 0.0
-    T = 1.0
-    eps = 1e-2
-    alpha = (1 + 1j) / 2
-    N = 300
-    M = 500
-
-    x = np.linspace(a, b, N + 1)
-    # q = np.sin(3 * np.pi * x[1:N])
-    q = zeros(N)
-
-    # прямая задача
-    forward = PDEBurgForward(a, b, N, t_0, T, M, eps, q, alpha)
-    u = forward.solve()
-
-    # если взять f_obs = u[-1], то psi будет тождественно нулевой
-    # поэтому делаем нетривиальные модельные данные
-    f_obs = u[-1].copy()
-    f_obs += 0.05 * np.exp(-200 * (x - 0.45) ** 2)
-
-    # сопряжённая задача
-    adjoint = PDEBurgAdjoint(a, b, N, t_0, T, M, u, f_obs, eps, q, alpha)
-    psi = adjoint.solve()
-
-    # ---------------------------
-    # Анимация
-    # ---------------------------
-    style.use('dark_background')
-    fig, (ax1, ax2) = subplots(2, 1, figsize=(10, 8))
-    fig.subplots_adjust(hspace=0.4)
-
-    ax1.set_title(r'Прямая задача', fontsize=14)
-    ax2.set_title(r'Сопряжённая задача', fontsize=14)
-
-    camera = Camera(fig)
-
-    ax1.set_xlim(a, b)
-    ax1.set_ylim(1.5 * u.min(), 1.5 * u.max())
-    ax1.set_xlabel(r'$x$', fontsize=20)
-    ax1.set_ylabel(r'$u$', fontsize=20)
-
-    ax2.set_xlim(a, b)
-    ax2.set_ylim(1.5 * psi.min(), 1.5 * psi.max())
-    ax2.set_xlabel(r'$x$', fontsize=20)
-    ax2.set_ylabel(r'$\Psi$', fontsize=20)
-
-    frame_step = 9
-    for m in range(0, M + 1, frame_step):
-        ax1.plot(x, u[m], color='y', ls='-', lw=2, label=r'$u(x,t)$')
-        ax2.plot(x, psi[m], color='c', ls='-', lw=2, label=r'$\Psi(x,t)$')
-        camera.snap()
-
-    animation = camera.animate(interval=20, repeat=True, blit=True)
-    show()
-
-
-if __name__ == '__main__':
-    __main__()
